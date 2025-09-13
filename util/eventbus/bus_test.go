@@ -221,6 +221,49 @@ func TestClient_Done(t *testing.T) {
 	}
 }
 
+func TestMonitor(t *testing.T) {
+	t.Run("Zero", func(t *testing.T) {
+		var zero eventbus.Monitor
+
+		ready := make(chan struct{})
+		go func() { zero.Wait(); close(ready) }()
+
+		select {
+		case <-ready:
+			// OK
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for Wait to return")
+		}
+	})
+
+	t.Run("Active", func(t *testing.T) {
+		ready := make(chan struct{})
+		m := eventbus.Go(func() { <-ready })
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			m.Wait()
+		}()
+
+		// While running, Wait does not complete.
+		select {
+		case <-done:
+			t.Error("monitor is ready before its goroutine is finished")
+		default:
+			// OK
+		}
+
+		close(ready) // allow the monitored goroutine to return
+		select {
+		case <-done:
+			// OK
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for Wait to return")
+		}
+	})
+}
+
 type queueChecker struct {
 	t    *testing.T
 	want []any

@@ -185,7 +185,7 @@ type Conn struct {
 	syncPub               *eventbus.Publisher[syncPoint]
 	allocRelayEndpointPub *eventbus.Publisher[UDPRelayAllocReq]
 	allocRelayEndpointSub *eventbus.Subscriber[UDPRelayAllocResp]
-	subsDoneCh            chan struct{} // closed when consumeEventbusTopics returns
+	subscriptions         eventbus.Monitor
 
 	// pconn4 and pconn6 are the underlying UDP sockets used to
 	// send/receive packets for wireguard and other magicsock
@@ -644,8 +644,6 @@ func newConn(logf logger.Logf) *Conn {
 // same as the [eventbus.Client] closing ([eventbus.Subscribers] are either
 // all open or all closed).
 func (c *Conn) consumeEventbusTopics() {
-	defer close(c.subsDoneCh)
-
 	for {
 		select {
 		case <-c.pmSub.Done():
@@ -741,8 +739,7 @@ func NewConn(opts Options) (*Conn, error) {
 	c.syncPub = eventbus.Publish[syncPoint](c.eventClient)
 	c.allocRelayEndpointPub = eventbus.Publish[UDPRelayAllocReq](c.eventClient)
 	c.allocRelayEndpointSub = eventbus.Subscribe[UDPRelayAllocResp](c.eventClient)
-	c.subsDoneCh = make(chan struct{})
-	go c.consumeEventbusTopics()
+	c.subscriptions = eventbus.Go(c.consumeEventbusTopics)
 
 	c.connCtx, c.connCtxCancel = context.WithCancel(context.Background())
 	c.donec = c.connCtx.Done()
@@ -3314,7 +3311,7 @@ func (c *Conn) Close() error {
 	//  2. Conn.consumeEventbusTopics event handlers may not guard against
 	//     undesirable post/in-progress Conn.Close() behaviors.
 	c.eventClient.Close()
-	<-c.subsDoneCh
+	c.subscriptions.Wait()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
